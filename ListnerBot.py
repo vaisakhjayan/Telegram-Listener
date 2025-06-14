@@ -5,6 +5,8 @@ import psutil
 import os
 import json
 import asyncio
+import platform
+import socket
 
 # === LOAD CONFIG ===
 def load_config():
@@ -22,12 +24,32 @@ def save_config(config):
     with open('config.json', 'w') as f:
         json.dump(config, f, indent=2)
 
+# === DEVICE DETECTION ===
+def get_current_device():
+    """Detect current device based on config or system info"""
+    # First try to get from config
+    if "current_device" in config:
+        return config["current_device"]
+    
+    # Auto-detect based on system info
+    system = platform.system().lower()
+    hostname = socket.gethostname().lower()
+    
+    # You can customize this logic based on your device names
+    if system == "darwin":  # macOS
+        return "mac"
+    elif system == "windows":
+        return "pc"
+    else:
+        return "unknown"
+
 # Load configuration
 config = load_config()
 BOT_TOKEN = config["bot_token"]
 AUTHORIZED_USER_IDS = config["authorized_user_ids"]
+CURRENT_DEVICE = get_current_device()
 
-# Track running processes
+# Track running processes (now with device context)
 running_processes = {}
 
 # === HELPER FUNCTIONS ===
@@ -37,15 +59,57 @@ def get_group_config(chat_id):
     return groups.get(str(chat_id), None)
 
 def get_scripts_for_group(chat_id):
-    """Get scripts configured for a specific group"""
+    """Get scripts configured for a specific group and current device"""
     group_config = get_group_config(chat_id)
     if not group_config:
         return {}
     
     scripts = {}
     for script in group_config.get("scripts", []):
-        scripts[script["name"]] = script["path"]
+        # Handle both old format (single path) and new format (device-specific paths)
+        if isinstance(script.get("path"), str):
+            # Old format - single path
+            scripts[script["name"]] = {
+                "path": script["path"],
+                "device": "legacy",
+                "description": script.get("description", "")
+            }
+        else:
+            # New format - device-specific paths
+            devices = script.get("devices", {})
+            for device_name, device_config in devices.items():
+                if isinstance(device_config, str):
+                    # Simple string path
+                    script_key = f"{script['name']} ({device_name.upper()})"
+                    scripts[script_key] = {
+                        "path": device_config,
+                        "device": device_name,
+                        "description": script.get("description", ""),
+                        "base_name": script["name"]
+                    }
+                else:
+                    # Object with path and other configs
+                    script_key = f"{script['name']} ({device_name.upper()})"
+                    scripts[script_key] = {
+                        "path": device_config.get("path", ""),
+                        "device": device_name,
+                        "description": device_config.get("description", script.get("description", "")),
+                        "base_name": script["name"],
+                        "python_cmd": device_config.get("python_cmd", "python3")
+                    }
+    
     return scripts
+
+def get_device_emoji(device_name):
+    """Get emoji for device type"""
+    device_emojis = {
+        "mac": "🍎",
+        "pc": "🖥️",
+        "windows": "🖥️",
+        "linux": "🐧",
+        "legacy": "💻"
+    }
+    return device_emojis.get(device_name.lower(), "💻")
 
 async def create_control_panel(chat_id):
     """Create the control panel keyboard for a specific group"""
@@ -54,21 +118,50 @@ async def create_control_panel(chat_id):
         return None
     
     keyboard = []
-    for script_name, script_path in scripts.items():
-        is_running = script_name in running_processes and running_processes[script_name].poll() is None
+    
+    # Group scripts by device for better organization
+    device_scripts = {}
+    for script_name, script_info in scripts.items():
+        device = script_info["device"]
+        if device not in device_scripts:
+            device_scripts[device] = []
+        device_scripts[device].append((script_name, script_info))
+    
+    # Create buttons for each device group
+    for device, script_list in device_scripts.items():
+        device_emoji = get_device_emoji(device)
         
-        if is_running:
-            # Show stop button if running
+        # Add device header if multiple devices
+        if len(device_scripts) > 1:
             keyboard.append([
-                InlineKeyboardButton(f"🔴 Stop {script_name}", callback_data=f"stop_{script_name}"),
-                InlineKeyboardButton(f"✅ Running", callback_data="status")
+                InlineKeyboardButton(f"{device_emoji} {device.upper()}", callback_data=f"device_info_{device}")
             ])
-        else:
-            # Show start button if not running
-            keyboard.append([
-                InlineKeyboardButton(f"🟢 Start {script_name}", callback_data=f"start_{script_name}"),
-                InlineKeyboardButton(f"⭕ Stopped", callback_data="status")
-            ])
+        
+        # Add script buttons for this device
+        for script_name, script_info in script_list:
+            # Create unique process key
+            process_key = f"{script_name}_{device}"
+            is_running = process_key in running_processes and running_processes[process_key].poll() is None
+            
+            # Only show buttons for current device or if it's a legacy script
+            if device == CURRENT_DEVICE or device == "legacy":
+                if is_running:
+                    # Show stop button if running
+                    keyboard.append([
+                        InlineKeyboardButton(f"🔴 Stop {script_name}", callback_data=f"stop_{script_name}_{device}"),
+                        InlineKeyboardButton(f"✅ Running", callback_data=f"status_{script_name}_{device}")
+                    ])
+                else:
+                    # Show start button if not running
+                    keyboard.append([
+                        InlineKeyboardButton(f"🟢 Start {script_name}", callback_data=f"start_{script_name}_{device}"),
+                        InlineKeyboardButton(f"⭕ Stopped", callback_data=f"status_{script_name}_{device}")
+                    ])
+            else:
+                # Show info button for other devices
+                keyboard.append([
+                    InlineKeyboardButton(f"ℹ️ {script_name} (Other Device)", callback_data=f"info_{script_name}_{device}")
+                ])
     
     # Add utility buttons
     keyboard.append([
@@ -98,7 +191,8 @@ async def auto_post_control_panel(application):
                 print(f"⚠️ No scripts configured for group {group_id}")
                 continue
                 
-            message = group_config.get("welcome_message", "🤖 Script Control Panel is ready!")
+            device_emoji = get_device_emoji(CURRENT_DEVICE)
+            message = group_config.get("welcome_message", f"🤖 Script Control Panel is ready!\n\n{device_emoji} Currently running on: **{CURRENT_DEVICE.upper()}**")
             
             await application.bot.send_message(
                 chat_id=int(group_id),
@@ -131,6 +225,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"Group ID: {chat_id}")
     print(f"Chat Type: {update.effective_chat.type}")
     print(f"Chat Title: {update.effective_chat.title}")
+    print(f"Current Device: {CURRENT_DEVICE}")
 
     group_config = get_group_config(chat_id)
     if not group_config:
@@ -152,7 +247,8 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ No scripts configured for this group.")
         return
 
-    welcome_message = group_config.get("welcome_message", "🤖 Script Control Panel 🤖")
+    device_emoji = get_device_emoji(CURRENT_DEVICE)
+    welcome_message = group_config.get("welcome_message", f"🤖 **Script Control Panel** 🤖\n\n{device_emoji} Currently running on: **{CURRENT_DEVICE.upper()}**")
     await update.message.reply_text(
         welcome_message,
         reply_markup=keyboard,
@@ -194,14 +290,26 @@ async def setup_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "groups" not in config:
         config["groups"] = {}
     
+    device_emoji = get_device_emoji(CURRENT_DEVICE)
     config["groups"][chat_id] = {
         "name": chat_title,
-        "welcome_message": f"🤖 **{chat_title} Control Panel** 🤖\n\nManage your scripts here!\n\n🟢 = Start Script\n🔴 = Stop Script\n📊 = Current Status",
+        "welcome_message": f"🤖 **{chat_title} Control Panel** 🤖\n\nManage your scripts here!\n\n🟢 = Start Script\n🔴 = Stop Script\n📊 = Current Status\n\n{device_emoji} Device: **{CURRENT_DEVICE.upper()}**",
         "scripts": [
             {
                 "name": "Example Script",
-                "path": "/path/to/your/script.py",
-                "description": "Replace this with your actual script"
+                "description": "Replace this with your actual script",
+                "devices": {
+                    "mac": {
+                        "path": "/Users/your-username/path/to/script.py",
+                        "python_cmd": "python3",
+                        "description": "macOS version"
+                    },
+                    "pc": {
+                        "path": "C:\\Users\\your-username\\path\\to\\script.py",
+                        "python_cmd": "python",
+                        "description": "Windows version"
+                    }
+                }
             }
         ],
         "auto_post": True
@@ -212,16 +320,29 @@ async def setup_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"✅ **Group Setup Complete!**\n\n"
         f"📍 Group: {chat_title}\n"
-        f"🆔 ID: `{chat_id}`\n\n"
+        f"🆔 ID: `{chat_id}`\n"
+        f"{device_emoji} Current Device: **{CURRENT_DEVICE.upper()}**\n\n"
         f"**Next Steps:**\n"
         f"1. Edit `config.json` to add your scripts\n"
-        f"2. Replace the example script with your real ones\n"
+        f"2. Configure paths for both Mac and PC\n"
         f"3. Restart the bot\n"
         f"4. Control panel will auto-appear here!\n\n"
-        f"**Example script entry:**\n"
+        f"**Multi-Device Script Example:**\n"
         f"```json\n"
-        f'\"name\": \"My Script\",\n'
-        f'\"path\": \"/full/path/to/script.py\"\n'
+        f'{{\n'
+        f'  \"name\": \"My Script\",\n'
+        f'  \"description\": \"Script description\",\n'
+        f'  \"devices\": {{\n'
+        f'    \"mac\": {{\n'
+        f'      \"path\": \"/Users/you/script.py\",\n'
+        f'      \"python_cmd\": \"python3\"\n'
+        f'    }},\n'
+        f'    \"pc\": {{\n'
+        f'      \"path\": \"C:\\\\Users\\\\you\\\\script.py\",\n'
+        f'      \"python_cmd\": \"python\"\n'
+        f'    }}\n'
+        f'  }}\n'
+        f'}}\n'
         f"```",
         parse_mode='Markdown'
     )
@@ -243,6 +364,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"💡 HINT: Found unconfigured group!")
         print(f"   Title: {chat_title}")
         print(f"   ID: {chat_id}")
+        print(f"   Device: {CURRENT_DEVICE}")
         print(f"   Use /setup_group in this chat to add it!")
 
 # === BUTTON HANDLER ===
@@ -268,7 +390,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("⚠️ No scripts configured for this group.")
             return
             
-        welcome_message = group_config.get("welcome_message", "🤖 Script Control Panel 🤖")
+        device_emoji = get_device_emoji(CURRENT_DEVICE)
+        welcome_message = group_config.get("welcome_message", f"🤖 **Script Control Panel** 🤖\n\n{device_emoji} Currently running on: **{CURRENT_DEVICE.upper()}**")
         await query.edit_message_text(
             welcome_message,
             reply_markup=keyboard,
@@ -278,75 +401,175 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     elif action_data == "settings":
         group_name = group_config.get("name", "Unknown") if group_config else "Not Configured"
+        device_emoji = get_device_emoji(CURRENT_DEVICE)
+        
+        # Count scripts by device
+        device_counts = {}
+        for script_name, script_info in scripts.items():
+            device = script_info["device"]
+            device_counts[device] = device_counts.get(device, 0) + 1
+        
+        # Count running processes
+        running_count = len([p for p in running_processes.values() if p.poll() is None])
+        
         settings_msg = f"⚙️ **Bot Settings for {group_name}:**\n\n"
-        settings_msg += f"• Authorized Users: {len(AUTHORIZED_USER_IDS)}\n"
-        settings_msg += f"• Configured Scripts: {len(scripts)}\n"
-        settings_msg += f"• Running Processes: {len([p for p in running_processes.values() if p.poll() is None])}\n"
-        settings_msg += f"• Auto-post Control Panel: {'✅' if config.get('auto_post_control_panel', False) else '❌'}\n"
-        settings_msg += f"• Group Chat ID: `{chat_id}`\n"
+        settings_msg += f"{device_emoji} **Current Device:** {CURRENT_DEVICE.upper()}\n"
+        settings_msg += f"👥 **Authorized Users:** {len(AUTHORIZED_USER_IDS)}\n"
+        settings_msg += f"📝 **Total Scripts:** {len(scripts)}\n"
+        for device, count in device_counts.items():
+            emoji = get_device_emoji(device)
+            settings_msg += f"   {emoji} {device.upper()}: {count}\n"
+        settings_msg += f"🔄 **Running Processes:** {running_count}\n"
+        settings_msg += f"📡 **Auto-post Control Panel:** {'✅' if config.get('auto_post_control_panel', False) else '❌'}\n"
+        settings_msg += f"🆔 **Group Chat ID:** `{chat_id}`\n"
         
         await query.answer(settings_msg, show_alert=True)
         return
     
-    elif action_data == "status":
-        status_msg = "📊 **Current Script Status:**\n\n"
-        for script_name in scripts:
-            is_running = script_name in running_processes and running_processes[script_name].poll() is None
-            status = "✅ Running" if is_running else "⭕ Stopped"
-            status_msg += f"• {script_name}: {status}\n"
+    elif action_data.startswith("device_info_"):
+        device = action_data[12:]  # Remove "device_info_" prefix
+        device_emoji = get_device_emoji(device)
         
-        await query.answer(status_msg, show_alert=True)
+        device_scripts = [name for name, info in scripts.items() if info["device"] == device]
+        
+        info_msg = f"{device_emoji} **{device.upper()} Device Info:**\n\n"
+        info_msg += f"📝 **Scripts:** {len(device_scripts)}\n"
+        info_msg += f"🔄 **Available:** {'✅' if device == CURRENT_DEVICE else '❌'}\n"
+        
+        if device == CURRENT_DEVICE:
+            info_msg += f"💡 **Status:** This is the current device\n"
+        else:
+            info_msg += f"💡 **Status:** Scripts managed on other device\n"
+        
+        await query.answer(info_msg, show_alert=True)
+        return
+    
+    elif action_data.startswith("status_"):
+        # Extract script name and device from callback data
+        parts = action_data[7:].split('_')  # Remove "status_" prefix
+        if len(parts) >= 2:
+            device = parts[-1]
+            script_name = '_'.join(parts[:-1])
+            
+            script_info = scripts.get(script_name)
+            if script_info:
+                process_key = f"{script_name}_{device}"
+                is_running = process_key in running_processes and running_processes[process_key].poll() is None
+                
+                device_emoji = get_device_emoji(device)
+                status_msg = f"📊 **Script Status:**\n\n"
+                status_msg += f"📝 **Name:** {script_name}\n"
+                status_msg += f"{device_emoji} **Device:** {device.upper()}\n"
+                status_msg += f"🔄 **Status:** {'✅ Running' if is_running else '⭕ Stopped'}\n"
+                status_msg += f"📁 **Path:** `{script_info['path']}`\n"
+                
+                if script_info.get('description'):
+                    status_msg += f"📋 **Description:** {script_info['description']}\n"
+                
+                await query.answer(status_msg, show_alert=True)
+        return
+    
+    elif action_data.startswith("info_"):
+        # Extract script name and device from callback data
+        parts = action_data[5:].split('_')  # Remove "info_" prefix
+        if len(parts) >= 2:
+            device = parts[-1]
+            script_name = '_'.join(parts[:-1])
+            
+            script_info = scripts.get(script_name)
+            if script_info:
+                device_emoji = get_device_emoji(device)
+                info_msg = f"ℹ️ **Script Info:**\n\n"
+                info_msg += f"📝 **Name:** {script_name}\n"
+                info_msg += f"{device_emoji} **Device:** {device.upper()}\n"
+                info_msg += f"📁 **Path:** `{script_info['path']}`\n"
+                info_msg += f"💡 **Note:** This script runs on another device\n"
+                
+                if script_info.get('description'):
+                    info_msg += f"📋 **Description:** {script_info['description']}\n"
+                
+                await query.answer(info_msg, show_alert=True)
         return
     
     elif action_data.startswith("start_"):
-        script_name = action_data[6:]  # Remove "start_" prefix
-        script_path = scripts.get(script_name)
-        
-        if script_path:
-            # Check if already running
-            if script_name in running_processes and running_processes[script_name].poll() is None:
-                await query.edit_message_text(f"⚠️ Script '{script_name}' is already running!")
-                return
+        # Extract script name and device from callback data
+        parts = action_data[6:].split('_')  # Remove "start_" prefix
+        if len(parts) >= 2:
+            device = parts[-1]
+            script_name = '_'.join(parts[:-1])
             
-            # Start the script
-            try:
-                process = subprocess.Popen(["python3", script_path])
-                running_processes[script_name] = process
-                await query.edit_message_text(f"✅ Script '{script_name}' has been started successfully!\n\nProcess ID: {process.pid}")
-            except Exception as e:
-                await query.edit_message_text(f"❌ Failed to start '{script_name}': {str(e)}")
-        else:
-            await query.edit_message_text("⚠️ Script not found.")
+            script_info = scripts.get(script_name)
+            if script_info and device == CURRENT_DEVICE:
+                process_key = f"{script_name}_{device}"
+                
+                # Check if already running
+                if process_key in running_processes and running_processes[process_key].poll() is None:
+                    await query.edit_message_text(f"⚠️ Script '{script_name}' is already running on {device.upper()}!")
+                    return
+                
+                # Start the script
+                try:
+                    python_cmd = script_info.get("python_cmd", "python3")
+                    process = subprocess.Popen([python_cmd, script_info["path"]])
+                    running_processes[process_key] = process
+                    
+                    device_emoji = get_device_emoji(device)
+                    await query.edit_message_text(
+                        f"✅ **Script Started Successfully!**\n\n"
+                        f"📝 **Name:** {script_name}\n"
+                        f"{device_emoji} **Device:** {device.upper()}\n"
+                        f"🆔 **Process ID:** {process.pid}\n"
+                        f"🐍 **Python Command:** {python_cmd}"
+                    )
+                except Exception as e:
+                    await query.edit_message_text(f"❌ Failed to start '{script_name}' on {device.upper()}: {str(e)}")
+            else:
+                await query.edit_message_text("⚠️ Script not found or not available on current device.")
     
     elif action_data.startswith("stop_"):
-        script_name = action_data[5:]  # Remove "stop_" prefix
-        
-        if script_name in running_processes:
-            process = running_processes[script_name]
-            if process.poll() is None:  # Process is still running
-                try:
-                    # Try to terminate gracefully first
-                    process.terminate()
+        # Extract script name and device from callback data
+        parts = action_data[5:].split('_')  # Remove "stop_" prefix
+        if len(parts) >= 2:
+            device = parts[-1]
+            script_name = '_'.join(parts[:-1])
+            
+            process_key = f"{script_name}_{device}"
+            
+            if process_key in running_processes:
+                process = running_processes[process_key]
+                if process.poll() is None:  # Process is still running
                     try:
-                        process.wait(timeout=5)  # Wait up to 5 seconds
-                    except subprocess.TimeoutExpired:
-                        # Force kill if it doesn't terminate gracefully
-                        process.kill()
-                        process.wait()
-                    
-                    del running_processes[script_name]
-                    await query.edit_message_text(f"🛑 Script '{script_name}' has been stopped successfully!")
-                except Exception as e:
-                    await query.edit_message_text(f"❌ Failed to stop '{script_name}': {str(e)}")
+                        # Try to terminate gracefully first
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)  # Wait up to 5 seconds
+                        except subprocess.TimeoutExpired:
+                            # Force kill if it doesn't terminate gracefully
+                            process.kill()
+                            process.wait()
+                        
+                        del running_processes[process_key]
+                        
+                        device_emoji = get_device_emoji(device)
+                        await query.edit_message_text(
+                            f"🛑 **Script Stopped Successfully!**\n\n"
+                            f"📝 **Name:** {script_name}\n"
+                            f"{device_emoji} **Device:** {device.upper()}\n"
+                            f"✅ **Status:** Process terminated"
+                        )
+                    except Exception as e:
+                        await query.edit_message_text(f"❌ Failed to stop '{script_name}' on {device.upper()}: {str(e)}")
+                else:
+                    await query.edit_message_text(f"⚠️ Script '{script_name}' is not running on {device.upper()}.")
             else:
-                await query.edit_message_text(f"⚠️ Script '{script_name}' is not running.")
-        else:
-            await query.edit_message_text(f"⚠️ No running process found for '{script_name}'.")
+                await query.edit_message_text(f"⚠️ No running process found for '{script_name}' on {device.upper()}.")
 
 # === POST INIT HOOK ===
 async def post_init(application):
     """Called after the bot starts"""
-    print("🚀 Bot initialization complete!")
+    device_emoji = get_device_emoji(CURRENT_DEVICE)
+    print(f"🚀 Bot initialization complete!")
+    print(f"{device_emoji} Running on device: {CURRENT_DEVICE.upper()}")
     
     # Auto-post control panel if enabled
     if config.get("auto_post_control_panel", False):
@@ -361,14 +584,18 @@ app.add_handler(CommandHandler("setup_group", setup_group))
 app.add_handler(CallbackQueryHandler(button))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-print("🤖 Multi-Group Listener bot is starting...")
+device_emoji = get_device_emoji(CURRENT_DEVICE)
+print(f"🤖 Multi-Device Listener bot is starting...")
+print(f"{device_emoji} Current Device: {CURRENT_DEVICE.upper()}")
 print("💡 Control panels will auto-post to all configured groups!")
 total_groups = len(config.get("groups", {}))
-total_scripts = sum(len(group.get("scripts", [])) for group in config.get("groups", {}).values())
+total_scripts = sum(len(get_scripts_for_group(group_id)) for group_id in config.get("groups", {}))
 print(f"📋 Loaded {total_groups} group(s) with {total_scripts} total script(s)")
-print("\n🔧 SETUP INSTRUCTIONS:")
+print("\n🔧 MULTI-DEVICE SETUP INSTRUCTIONS:")
 print("1. Add bot to your group")
 print("2. Type /setup_group in the group")
-print("3. Edit config.json to add your scripts")
-print("4. Restart bot - control panel will auto-appear!")
+print("3. Edit config.json to add device-specific script paths")
+print("4. Set 'current_device' in config.json (mac/pc)")
+print("5. Restart bot - control panel will auto-appear!")
+print("6. Deploy same config to other devices and restart there too!")
 app.run_polling()
