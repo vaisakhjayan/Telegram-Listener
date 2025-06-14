@@ -1,5 +1,5 @@
 {
-  "current_device": "mac",
+  "current_device": "pc",
   "bot_token": "7901410354:AAHOjdgxQE7pGNVgKAhqC89F4Sy-icfyLxk",
   "authorized_user_ids": [
     902758536
@@ -8,7 +8,8 @@
   "groups": {
     "-4746268141": {
       "name": "4. Script Writer (GPT)",
-      "welcome_message": "🤖 **Script Writer (GPT) Control Panel** 🤖\n\nManage your scripts here!\n\n🟢 = Start Script\n🔴 = Stop Script\n📊 = Current Status",
+      "welcome_message": "\u00f0\u0178\u00a4\u2013 **Script Writer (GPT) Control Panel** \u00f0\u0178\u00a4\u2013\n\nManage your scripts here!\n\n\u00f0\u0178\u0178\u00a2 = Start Script (Mac)\n\u00f0\u0178\u0178\u00a1 = Start Script (PC)\n\u00f0\u0178\u201d\u00b4 = Stop Script\n\u00f0\u0178\u201c\u0160 = Current Status",
+      "selected_device": "mac",
       "scripts": [
         {
           "name": "4. Script Writer (GPT)",
@@ -32,7 +33,8 @@
     },
     "-4855501724": {
       "name": "2. Play AI API",
-      "welcome_message": "🚀 **Play AI API Control Panel** 🚀\n\nManage your API services here!\n\n🟢 = Start Service\n🔴 = Stop Service\n📊 = Status Check",
+      "welcome_message": "\u00f0\u0178\u0161\u20ac **Play AI API Control Panel** \u00f0\u0178\u0161\u20ac\n\nManage your API services here!\n\n\u00f0\u0178\u0178\u00a2 = Start Service (Mac)\n\u00f0\u0178\u0178\u00a1 = Start Service (PC)\n\u00f0\u0178\u201d\u00b4 = Stop Service\n\u00f0\u0178\u201c\u0160 = Status Check",
+      "selected_device": "mac",
       "scripts": [
         {
           "name": "2. Play AI API",
@@ -45,7 +47,7 @@
               "description": "macOS version"
             },
             "pc": {
-              "path": "C:\\Users\\superman\\Documents\\Github\\PlayAI---Personal-For-Both-Platforms\\main.py",
+              "path": "D:\\Github\\PlayAI---Personal-For-Both-Platforms-\\main.py",
               "python_cmd": "python3",
               "description": "Windows version"
             }
@@ -56,7 +58,8 @@
     },
     "-4978978123": {
       "name": "3. Play AI Joint API",
-      "welcome_message": "🎮 **Play AI Joint API Control Panel** 🎮\n\nControl your joint API scripts here!\n\n🟢 = Start Script\n🔴 = Stop Script\n📊 = Current Status",
+      "welcome_message": "\u00f0\u0178\u017d\u00ae **Play AI Joint API Control Panel** \u00f0\u0178\u017d\u00ae\n\nControl your joint API scripts here!\n\n\u00f0\u0178\u0178\u00a2 = Start Script (Mac)\n\u00f0\u0178\u0178\u00a1 = Start Script (PC)\n\u00f0\u0178\u201d\u00b4 = Stop Script\n\u00f0\u0178\u201c\u0160 = Current Status",
+      "selected_device": "mac",
       "scripts": [
         {
           "name": "Joint API Service",
