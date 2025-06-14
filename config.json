@@ -1,0 +1,51 @@
+{
+  "bot_token": "7901410354:AAHOjdgxQE7pGNVgKAhqC89F4Sy-icfyLxk",
+  "authorized_user_ids": [
+    902758536
+  ],
+  "auto_post_control_panel": true,
+  "groups": {
+    "-4746268141": {
+      "name": "4. Script Writer (GPT)",
+      "welcome_message": "🤖 **Script Writer (GPT) Control Panel** 🤖\n\nManage your scripts here!\n\n🟢 = Start Script\n🔴 = Stop Script\n📊 = Current Status",
+      "scripts": [
+        {
+          "name": "4. Script Writer (GPT)",
+          "path": "/Users/superman/Documents/Github/PlayAI---Personal-For-Both-Platforms-/main.py",
+          "description": "Personal AI Assistant Script"
+        }
+      ],
+      "auto_post": true
+    },
+    "-4855501724": {
+      "name": "2. Play AI API",
+      "welcome_message": "🚀 **Play AI API Control Panel** 🚀\n\nManage your API services here!\n\n🟢 = Start Service\n🔴 = Stop Service\n📊 = Status Check",
+      "scripts": [
+        {
+          "name": "2. Play AI API",
+          "path": "/Users/superman/Documents/Github/PlayAI---Personal-For-Both-Platforms-/main.py",
+          "description": "Joint API Service for Both Platforms"
+        }
+      ],
+      "auto_post": true
+    },
+    "-4978978123": {
+      "name": "3. Play AI Joint API",
+      "welcome_message": "🎮 **Play AI Joint API Control Panel** 🎮\n\nControl your joint API scripts here!\n\n🟢 = Start Script\n🔴 = Stop Script\n📊 = Current Status",
+      "scripts": [
+        {
+          "name": "Joint API Service",
+          "path": "/Users/superman/Documents/Github/Play-AI-API---Joint-For-Both-Platforms/main.py",
+          "description": "API service for multiple platforms"
+        }
+      ],
+      "auto_post": true
+    }
+  },
+  "setup_instructions": {
+    "step1": "Add bot to your group",
+    "step2": "Type /setup_group in the group",
+    "step3": "Configure scripts for that group in config.json",
+    "step4": "Restart bot - control panel will auto-appear!"
+  }
+}
